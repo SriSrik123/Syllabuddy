@@ -7,7 +7,7 @@ import { getGoogleAuthUrl, getGoogleTokens, getGoogleUserInfo } from '../service
 
 const router = Router();
 const JWT_SECRET = process.env.JWT_SECRET || 'default-secret-change-me';
-const CLIENT_URL = 'http://localhost:5174';
+const CLIENT_URL = process.env.CLIENT_URL || 'http://localhost:5174';
 
 function generateToken(userId: string): string {
   return jwt.sign({ userId }, JWT_SECRET, { expiresIn: '7d' });

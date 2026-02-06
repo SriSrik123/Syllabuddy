@@ -6,7 +6,7 @@ import { authenticateToken, AuthRequest } from '../middleware/auth';
 import { getGoogleCalendarConnectUrl, getGoogleTokens, insertGoogleCalendarEvent } from '../services/googleAuth';
 
 const router = Router();
-const CLIENT_URL = 'http://localhost:5174';
+const CLIENT_URL = process.env.CLIENT_URL || 'http://localhost:5174';
 
 // POST /api/calendar/events - create event manually
 router.post('/events', authenticateToken, async (req: AuthRequest, res: Response) => {
