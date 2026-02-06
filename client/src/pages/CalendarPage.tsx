@@ -8,7 +8,7 @@ import {
   Trash2,
   Loader2,
   Download,
-  Check,
+  // Check,
   Link2,
   Link2Off,
   CalendarPlus,
@@ -53,15 +53,15 @@ const typeBadge: Record<string, string> = {
   other: 'bg-gray-100 text-gray-600 dark:bg-gray-800 dark:text-gray-400',
 };
 
-const typeDot: Record<string, string> = {
-  exam: 'bg-red-500',
-  assignment: 'bg-blue-500',
-  deadline: 'bg-amber-500',
-  quiz: 'bg-yellow-500',
-  project: 'bg-violet-500',
-  holiday: 'bg-emerald-500',
-  other: 'bg-gray-400',
-};
+// const typeDot: Record<string, string> = {
+//   exam: 'bg-red-500',
+//   assignment: 'bg-blue-500',
+//   deadline: 'bg-amber-500',
+//   quiz: 'bg-yellow-500',
+//   project: 'bg-violet-500',
+//   holiday: 'bg-emerald-500',
+//   other: 'bg-gray-400',
+// };
 
 const statusConfig = {
   todo: { icon: Circle, label: 'To do', color: 'text-gray-400 dark:text-gray-500', bg: '' },
@@ -130,7 +130,7 @@ export default function CalendarPage() {
   const [addingEventId, setAddingEventId] = useState<string | null>(null);
   const [addingAll, setAddingAll] = useState(false);
   const [friendProgress, setFriendProgress] = useState<Record<string, FriendProgress>>({});
-  const [friendCount, setFriendCount] = useState(0);
+  const [, setFriendCount] = useState(0);
   const { refreshUser } = useAuth();
   const [searchParams, setSearchParams] = useSearchParams();
 

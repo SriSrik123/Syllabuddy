@@ -2,7 +2,7 @@ import { useState, useEffect } from 'react';
 import { friendsAPI } from '../services/api';
 import toast from 'react-hot-toast';
 import {
-  UserPlus,
+  // UserPlus,
   Users,
   Loader2,
   Check,
