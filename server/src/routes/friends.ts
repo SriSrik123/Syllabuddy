@@ -200,6 +200,8 @@ router.delete('/:id', authenticateToken, async (req: AuthRequest, res: Response)
 // GET /api/friends/class-overlap - how many friends share each class/event
 router.get('/class-overlap', authenticateToken, async (req: AuthRequest, res: Response) => {
   try {
+    const normalize = (s: string) => s.toLowerCase().replace(/[^a-z0-9]/g, '');
+
     // Get friend IDs
     const friendships = await Friendship.find({
       $or: [{ requester: req.userId }, { recipient: req.userId }],
@@ -215,39 +217,45 @@ router.get('/class-overlap', authenticateToken, async (req: AuthRequest, res: Re
       return;
     }
 
-    // Get user's classes
+    // Get user's events
     const myEvents = await CalendarEvent.find({ userId: req.userId });
-    const myClassNames = [...new Set(myEvents.map((e) => e.className))];
+    const myClassNorms = [...new Set(myEvents.map((e) => normalize(e.className)))];
 
-    // Count how many friends have events in each class
+    // Get ALL friend events (we'll match by normalized class name in JS)
     const friendEvents = await CalendarEvent.find({
       userId: { $in: friendIds },
-      className: { $in: myClassNames },
     });
 
-    // Class overlap: how many unique friends per class
+    // Filter friend events to those whose normalized class name matches
+    const matchingFriendEvents = friendEvents.filter((fe) =>
+      myClassNorms.includes(normalize(fe.className))
+    );
+
+    // Class overlap: how many unique friends per class (using my class name)
     const classOverlap: Record<string, number> = {};
     const classFriendSets: Record<string, Set<string>> = {};
-    for (const fe of friendEvents) {
-      if (!classFriendSets[fe.className]) classFriendSets[fe.className] = new Set();
-      classFriendSets[fe.className].add(fe.userId.toString());
+    for (const fe of matchingFriendEvents) {
+      // Map back to user's class name
+      const feNorm = normalize(fe.className);
+      const myClass = myEvents.find((e) => normalize(e.className) === feNorm)?.className || fe.className;
+      if (!classFriendSets[myClass]) classFriendSets[myClass] = new Set();
+      classFriendSets[myClass].add(fe.userId.toString());
     }
     for (const [cls, friendSet] of Object.entries(classFriendSets)) {
       classOverlap[cls] = friendSet.size;
     }
 
     // Event overlap: for each of user's events, how many friends have that same event
-    const normalize = (s: string) => s.toLowerCase().replace(/[^a-z0-9]/g, '');
     const eventFriendCount: Record<string, Set<string>> = {};
-    for (const fe of friendEvents) {
-      const key = `${fe.className}::${normalize(fe.title)}`;
+    for (const fe of matchingFriendEvents) {
+      const key = `${normalize(fe.className)}::${normalize(fe.title)}`;
       if (!eventFriendCount[key]) eventFriendCount[key] = new Set();
       eventFriendCount[key].add(fe.userId.toString());
     }
 
     const eventOverlap: Record<string, number> = {};
     for (const ev of myEvents) {
-      const key = `${ev.className}::${normalize(ev.title)}`;
+      const key = `${normalize(ev.className)}::${normalize(ev.title)}`;
       if (eventFriendCount[key]) {
         eventOverlap[ev._id.toString()] = eventFriendCount[key].size;
       }
@@ -285,17 +293,17 @@ router.get('/event-friends/:eventId', authenticateToken, async (req: AuthRequest
       return;
     }
 
-    // Find matching events from friends (same class + normalized title)
+    // Find matching events from friends (normalized class + normalized title)
     const normalize = (s: string) => s.toLowerCase().replace(/[^a-z0-9]/g, '');
-    const myNorm = normalize(myEvent.title);
+    const myClassNorm = normalize(myEvent.className);
+    const myTitleNorm = normalize(myEvent.title);
 
     const friendEvents = await CalendarEvent.find({
       userId: { $in: friendIds },
-      className: myEvent.className,
     }).populate('userId', 'name email');
 
     const matchingFriends = friendEvents
-      .filter((fe) => normalize(fe.title) === myNorm)
+      .filter((fe) => normalize(fe.className) === myClassNorm && normalize(fe.title) === myTitleNorm)
       .map((fe) => {
         const user = fe.userId as any;
         return {
@@ -341,21 +349,23 @@ router.get('/progress', authenticateToken, async (req: AuthRequest, res: Respons
       return;
     }
 
-    // 3. Get friends' events for matching classes
-    const myClassNames = [...new Set(myEvents.map((e) => e.className))];
+    // 3. Get ALL friends' events (match by normalized class name in JS)
+    const normalize = (s: string) => s.toLowerCase().replace(/[^a-z0-9]/g, '');
+    const myClassNorms = [...new Set(myEvents.map((e) => normalize(e.className)))];
 
-    const friendEvents = await CalendarEvent.find({
+    const allFriendEvents = await CalendarEvent.find({
       userId: { $in: friendIds },
-      className: { $in: myClassNames },
     });
 
-    // 4. Build lookup: normalize title for matching
-    const normalize = (s: string) => s.toLowerCase().replace(/[^a-z0-9]/g, '');
+    // Filter to matching classes (case-insensitive)
+    const friendEvents = allFriendEvents.filter((fe) =>
+      myClassNorms.includes(normalize(fe.className))
+    );
 
-    // Group friend events by className + normalized title
+    // 4. Build lookup: normalize both class and title for matching
     const friendMap: Record<string, { todo: number; in_progress: number; done: number; total: number }> = {};
     for (const fe of friendEvents) {
-      const key = `${fe.className}::${normalize(fe.title)}`;
+      const key = `${normalize(fe.className)}::${normalize(fe.title)}`;
       if (!friendMap[key]) {
         friendMap[key] = { todo: 0, in_progress: 0, done: 0, total: 0 };
       }
@@ -366,7 +376,7 @@ router.get('/progress', authenticateToken, async (req: AuthRequest, res: Respons
     // 5. Map back to user's event IDs
     const progress: Record<string, { todo: number; in_progress: number; done: number; total: number }> = {};
     for (const ev of myEvents) {
-      const key = `${ev.className}::${normalize(ev.title)}`;
+      const key = `${normalize(ev.className)}::${normalize(ev.title)}`;
       if (friendMap[key]) {
         progress[ev._id.toString()] = friendMap[key];
       }
