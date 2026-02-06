@@ -114,6 +114,7 @@ export const friendsAPI = {
   removeFriend: (id: string) => api.delete(`/friends/${id}`),
   getProgress: () => api.get('/friends/progress'),
   getClassOverlap: () => api.get('/friends/class-overlap'),
+  getEventFriends: (eventId: string) => api.get(`/friends/event-friends/${eventId}`),
 };
 
 export default api;

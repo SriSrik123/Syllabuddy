@@ -1,7 +1,7 @@
 import { useState, useEffect } from 'react';
 import { Link } from 'react-router-dom';
 import { useAuth } from '../context/AuthContext';
-import { syllabusAPI, calendarAPI } from '../services/api';
+import { syllabusAPI, calendarAPI, friendsAPI } from '../services/api';
 import toast from 'react-hot-toast';
 import {
   Upload,
@@ -15,6 +15,8 @@ import {
   BookOpen,
   Plus,
   ClipboardList,
+  Users,
+  X,
 } from 'lucide-react';
 
 interface Syllabus {
@@ -31,6 +33,13 @@ interface CalEvent {
   date: string;
   className: string;
   eventType: string;
+}
+
+interface FriendProgress {
+  todo: number;
+  in_progress: number;
+  done: number;
+  total: number;
 }
 
 const typeLabel: Record<string, string> = {
@@ -58,6 +67,15 @@ export default function Dashboard() {
   const [syllabi, setSyllabi] = useState<Syllabus[]>([]);
   const [upcomingEvents, setUpcomingEvents] = useState<CalEvent[]>([]);
   const [loading, setLoading] = useState(true);
+  const [friendProgress, setFriendProgress] = useState<Record<string, FriendProgress>>({});
+  const [eventOverlap, setEventOverlap] = useState<Record<string, number>>({});
+  const [classOverlap, setClassOverlap] = useState<Record<string, number>>({});
+  const [friendCount, setFriendCount] = useState(0);
+
+  // Modal state
+  const [modalEvent, setModalEvent] = useState<CalEvent | null>(null);
+  const [modalFriends, setModalFriends] = useState<Array<{ name: string; email: string; status: string }>>([]);
+  const [modalLoading, setModalLoading] = useState(false);
 
   useEffect(() => { loadData(); }, []);
 
@@ -69,6 +87,19 @@ export default function Dashboard() {
       ]);
       setSyllabi(syllRes.data);
       setUpcomingEvents(eventsRes.data.slice(0, 7));
+
+      // Load friend data
+      try {
+        const [progressRes, overlapRes, friendsRes] = await Promise.all([
+          friendsAPI.getProgress(),
+          friendsAPI.getClassOverlap(),
+          friendsAPI.list(),
+        ]);
+        setFriendProgress(progressRes.data.progress || {});
+        setEventOverlap(overlapRes.data.eventOverlap || {});
+        setClassOverlap(overlapRes.data.classOverlap || {});
+        setFriendCount(friendsRes.data.length || 0);
+      } catch { /* friends data is optional */ }
     } catch {
       toast.error('Failed to load data');
     } finally {
@@ -84,6 +115,20 @@ export default function Dashboard() {
       loadData();
     } catch {
       toast.error('Failed to delete');
+    }
+  };
+
+  const handleEventClick = async (event: CalEvent) => {
+    setModalEvent(event);
+    setModalLoading(true);
+    setModalFriends([]);
+    try {
+      const res = await friendsAPI.getEventFriends(event._id);
+      setModalFriends(res.data.friends || []);
+    } catch {
+      setModalFriends([]);
+    } finally {
+      setModalLoading(false);
     }
   };
 
@@ -134,7 +179,7 @@ export default function Dashboard() {
           { label: 'Courses', value: syllabi.length, icon: BookOpen },
           { label: 'Upcoming events', value: upcomingEvents.length, icon: CalendarDays },
           { label: 'Due this week', value: thisWeekCount, icon: Clock },
-          { label: 'AI queries', value: '\u221E', icon: MessageSquare },
+          { label: 'Friends', value: friendCount, icon: Users },
         ].map((m) => (
           <div key={m.label} className="bg-white dark:bg-gray-900 p-5">
             <div className="flex items-center gap-2 mb-2">
@@ -170,6 +215,11 @@ export default function Dashboard() {
                     <FileText className="w-4 h-4 text-blue-500 dark:text-blue-400 flex-shrink-0" />
                     <div className="flex-1 min-w-0">
                       <p className="text-sm text-gray-900 dark:text-white truncate">{s.className}</p>
+                      {classOverlap[s.className] ? (
+                        <p className="text-[10px] text-blue-500 dark:text-blue-400">
+                          {classOverlap[s.className]} friend{classOverlap[s.className] !== 1 ? 's' : ''} also taking this
+                        </p>
+                      ) : null}
                     </div>
                     <button
                       onClick={() => handleDelete(s._id, s.className)}
@@ -189,6 +239,7 @@ export default function Dashboard() {
               { to: '/assignments', icon: ClipboardList, label: 'Assignments', desc: 'Add tasks manually or with AI' },
               { to: '/chat', icon: MessageSquare, label: 'Ask AI', desc: 'Search across all syllabi' },
               { to: '/calendar', icon: CalendarDays, label: 'Calendar', desc: 'View and export dates' },
+              { to: '/friends', icon: Users, label: 'Friends', desc: 'Connect with classmates' },
               { to: '/upload', icon: Upload, label: 'Upload', desc: 'Add a new syllabus' },
             ].map((item) => (
               <Link key={item.to} to={item.to} className="flex items-center gap-3 px-3.5 py-3 hover:bg-gray-50 dark:hover:bg-gray-800/50 transition-colors">
@@ -233,12 +284,17 @@ export default function Dashboard() {
               {upcomingEvents.map((event) => {
                 const urgent = isUrgent(event.date);
                 const d = new Date(event.date);
+                const overlap = eventOverlap[event._id];
+                const fp = friendProgress[event._id];
+                const friendInfo = overlap || (fp && fp.total > 0);
+
                 return (
                   <div
                     key={event._id}
+                    onClick={() => friendInfo ? handleEventClick(event) : undefined}
                     className={`grid grid-cols-12 gap-2 px-4 py-3 items-center border-b border-gray-50 dark:border-gray-800/50 last:border-0 ${
                       urgent ? 'bg-red-50/50 dark:bg-red-950/10' : ''
-                    }`}
+                    } ${friendInfo ? 'cursor-pointer hover:bg-gray-50 dark:hover:bg-gray-800/30 transition-colors' : ''}`}
                   >
                     {/* Date */}
                     <div className="col-span-1">
@@ -250,9 +306,20 @@ export default function Dashboard() {
                       </p>
                     </div>
 
-                    {/* Event name */}
+                    {/* Event name + friend info */}
                     <div className="col-span-4">
                       <p className="text-sm text-gray-900 dark:text-white truncate">{event.title}</p>
+                      {friendInfo && (
+                        <div className="flex items-center gap-1 mt-0.5">
+                          <Users className="w-3 h-3 text-blue-400 flex-shrink-0" />
+                          <span className="text-[10px] text-blue-500 dark:text-blue-400">
+                            {fp && fp.total > 0
+                              ? `${fp.done} of ${fp.total} done`
+                              : `${overlap} friend${overlap !== 1 ? 's' : ''} also have this`
+                            }
+                          </span>
+                        </div>
+                      )}
                     </div>
 
                     {/* Course */}
@@ -285,6 +352,71 @@ export default function Dashboard() {
           )}
         </div>
       </div>
+
+      {/* Modal: friends who have this event */}
+      {modalEvent && (
+        <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/40 backdrop-blur-sm" onClick={() => setModalEvent(null)}>
+          <div
+            className="bg-white dark:bg-gray-900 rounded-lg border border-gray-200 dark:border-gray-800 shadow-xl w-full max-w-sm mx-4"
+            onClick={(e) => e.stopPropagation()}
+          >
+            {/* Modal header */}
+            <div className="flex items-center justify-between px-4 py-3 border-b border-gray-100 dark:border-gray-800">
+              <div className="min-w-0">
+                <p className="text-sm font-semibold text-gray-900 dark:text-white truncate">{modalEvent.title}</p>
+                <p className="text-xs text-gray-500 dark:text-gray-400">{modalEvent.className}</p>
+              </div>
+              <button
+                onClick={() => setModalEvent(null)}
+                className="p-1 text-gray-400 hover:text-gray-600 dark:hover:text-gray-300 rounded transition-colors flex-shrink-0"
+              >
+                <X className="w-4 h-4" />
+              </button>
+            </div>
+
+            {/* Modal body */}
+            <div className="px-4 py-3">
+              <p className="text-[11px] font-semibold text-gray-400 dark:text-gray-500 uppercase tracking-wider mb-2">
+                Friends with this {typeLabel[modalEvent.eventType]?.toLowerCase() || 'event'}
+              </p>
+
+              {modalLoading ? (
+                <div className="flex items-center justify-center py-6">
+                  <Loader2 className="w-4 h-4 animate-spin text-blue-500" />
+                </div>
+              ) : modalFriends.length === 0 ? (
+                <p className="text-sm text-gray-500 dark:text-gray-400 text-center py-4">
+                  No friends have this event yet
+                </p>
+              ) : (
+                <div className="space-y-0 divide-y divide-gray-100 dark:divide-gray-800">
+                  {modalFriends.map((friend, i) => (
+                    <div key={i} className="flex items-center gap-3 py-2.5">
+                      <div className="w-7 h-7 bg-blue-50 dark:bg-blue-900/30 rounded-full flex items-center justify-center flex-shrink-0">
+                        <span className="text-[10px] font-semibold text-blue-700 dark:text-blue-400">
+                          {friend.name.charAt(0).toUpperCase()}
+                        </span>
+                      </div>
+                      <div className="flex-1 min-w-0">
+                        <p className="text-sm text-gray-900 dark:text-white truncate">{friend.name}</p>
+                      </div>
+                      <span className={`text-[10px] font-medium px-1.5 py-0.5 rounded ${
+                        friend.status === 'done'
+                          ? 'bg-green-50 text-green-700 dark:bg-green-950/30 dark:text-green-400'
+                          : friend.status === 'in_progress'
+                          ? 'bg-amber-50 text-amber-700 dark:bg-amber-950/30 dark:text-amber-400'
+                          : 'bg-gray-100 text-gray-500 dark:bg-gray-800 dark:text-gray-400'
+                      }`}>
+                        {friend.status === 'done' ? 'Done' : friend.status === 'in_progress' ? 'Working' : 'To do'}
+                      </span>
+                    </div>
+                  ))}
+                </div>
+              )}
+            </div>
+          </div>
+        </div>
+      )}
     </div>
   );
 }

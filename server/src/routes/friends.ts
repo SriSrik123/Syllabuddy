@@ -260,6 +260,58 @@ router.get('/class-overlap', authenticateToken, async (req: AuthRequest, res: Re
   }
 });
 
+// GET /api/friends/event-friends/:eventId - get friends who have a matching event
+router.get('/event-friends/:eventId', authenticateToken, async (req: AuthRequest, res: Response) => {
+  try {
+    // Get the user's event
+    const myEvent = await CalendarEvent.findOne({ _id: req.params.eventId, userId: req.userId });
+    if (!myEvent) {
+      res.status(404).json({ error: 'Event not found' });
+      return;
+    }
+
+    // Get friend IDs
+    const friendships = await Friendship.find({
+      $or: [{ requester: req.userId }, { recipient: req.userId }],
+      status: 'accepted',
+    });
+
+    const friendIds = friendships.map((f) =>
+      f.requester.toString() === req.userId ? f.recipient : f.requester
+    );
+
+    if (friendIds.length === 0) {
+      res.json({ friends: [] });
+      return;
+    }
+
+    // Find matching events from friends (same class + normalized title)
+    const normalize = (s: string) => s.toLowerCase().replace(/[^a-z0-9]/g, '');
+    const myNorm = normalize(myEvent.title);
+
+    const friendEvents = await CalendarEvent.find({
+      userId: { $in: friendIds },
+      className: myEvent.className,
+    }).populate('userId', 'name email');
+
+    const matchingFriends = friendEvents
+      .filter((fe) => normalize(fe.title) === myNorm)
+      .map((fe) => {
+        const user = fe.userId as any;
+        return {
+          name: user.name || 'Unknown',
+          email: user.email || '',
+          status: fe.status || 'todo',
+        };
+      });
+
+    res.json({ friends: matchingFriends });
+  } catch (err) {
+    console.error('Event friends error:', err);
+    res.status(500).json({ error: 'Failed to fetch event friends' });
+  }
+});
+
 // GET /api/friends/progress - get friend progress on matching events
 // Returns aggregated data for all of current user's events
 router.get('/progress', authenticateToken, async (req: AuthRequest, res: Response) => {
