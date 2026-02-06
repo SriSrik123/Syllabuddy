@@ -15,7 +15,8 @@
     "mongoose": "^9.1.6",
     "multer": "^2.0.2",
     "openai": "^6.18.0",
-    "pdf-parse": "^2.4.5"
+    "pdf-parse": "^2.4.5",
+    "firebase-admin": "^13.0.0"
   },
   "devDependencies": {
     "@types/bcryptjs": "^2.4.6",

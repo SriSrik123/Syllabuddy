@@ -3,6 +3,7 @@ import { Link, useNavigate } from 'react-router-dom';
 import { useAuth } from '../context/AuthContext';
 import { useTheme } from '../context/ThemeContext';
 import { authAPI } from '../services/api';
+import { signInWithGoogle } from '../services/firebase';
 import toast from 'react-hot-toast';
 import { Loader2, Sun, Moon } from 'lucide-react';
 
@@ -11,7 +12,7 @@ export default function Login() {
   const [password, setPassword] = useState('');
   const [loading, setLoading] = useState(false);
   const [googleLoading, setGoogleLoading] = useState(false);
-  const { login } = useAuth();
+  const { login, loginWithToken } = useAuth();
   const { theme, toggleTheme } = useTheme();
   const navigate = useNavigate();
 
@@ -26,6 +27,21 @@ export default function Login() {
       toast.error(err.response?.data?.error || 'Login failed');
     } finally {
       setLoading(false);
+    }
+  };
+
+  const handleGoogleSignIn = async () => {
+    setGoogleLoading(true);
+    try {
+      const firebaseIdToken = await signInWithGoogle();
+      const res = await authAPI.firebaseGoogleLogin(firebaseIdToken);
+      await loginWithToken(res.data.token);
+      toast.success('Signed in with Google!');
+      navigate('/dashboard');
+    } catch (err: any) {
+      toast.error(err.response?.data?.error || 'Google Sign-In failed');
+    } finally {
+      setGoogleLoading(false);
     }
   };
 
@@ -50,16 +66,7 @@ export default function Login() {
           <button
             type="button"
             disabled={googleLoading}
-            onClick={async () => {
-              setGoogleLoading(true);
-              try {
-                const res = await authAPI.googleAuthUrl();
-                window.location.href = res.data.url;
-              } catch {
-                toast.error('Google Sign-In not configured. Add Google OAuth credentials to .env');
-                setGoogleLoading(false);
-              }
-            }}
+            onClick={handleGoogleSignIn}
             className="w-full py-2.5 bg-white dark:bg-gray-900 border border-gray-300 dark:border-gray-700 rounded-md text-[13px] font-medium text-gray-700 dark:text-gray-200 hover:bg-gray-50 dark:hover:bg-gray-800 disabled:opacity-50 disabled:cursor-not-allowed transition-colors flex items-center justify-center gap-2.5"
           >
             {googleLoading ? (

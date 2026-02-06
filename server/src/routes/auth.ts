@@ -4,6 +4,7 @@ import jwt from 'jsonwebtoken';
 import User from '../models/User';
 import { authenticateToken, AuthRequest } from '../middleware/auth';
 import { getGoogleAuthUrl, getGoogleTokens, getGoogleUserInfo } from '../services/googleAuth';
+import { verifyFirebaseToken } from '../services/firebaseAdmin';
 
 const router = Router();
 const JWT_SECRET = process.env.JWT_SECRET || 'default-secret-change-me';
@@ -120,7 +121,68 @@ router.get('/me', authenticateToken, async (req: AuthRequest, res: Response) => 
   }
 });
 
-// GET /api/auth/google - redirect to Google sign-in
+// POST /api/auth/firebase-google - sign in with Firebase Google token
+router.post('/firebase-google', async (req: Request, res: Response) => {
+  try {
+    const { idToken } = req.body;
+
+    if (!idToken) {
+      res.status(400).json({ error: 'Firebase ID token is required' });
+      return;
+    }
+
+    // Verify the Firebase ID token
+    const decodedToken = await verifyFirebaseToken(idToken);
+    const { email, name, uid, picture } = decodedToken;
+
+    if (!email) {
+      res.status(400).json({ error: 'No email associated with this Google account' });
+      return;
+    }
+
+    // Find or create user in our database
+    let user = await User.findOne({
+      $or: [
+        { googleId: uid },
+        { email: email.toLowerCase() },
+      ],
+    });
+
+    if (user) {
+      // Update Google ID if not set
+      if (!user.googleId) {
+        user.googleId = uid;
+      }
+      await user.save();
+    } else {
+      // Create new user
+      user = new User({
+        email: email.toLowerCase(),
+        name: name || email.split('@')[0],
+        googleId: uid,
+        passwordHash: '',
+      });
+      await user.save();
+    }
+
+    const token = generateToken(user._id.toString());
+
+    res.json({
+      token,
+      user: {
+        id: user._id,
+        email: user.email,
+        name: user.name,
+        googleCalendarConnected: user.googleCalendarConnected,
+      },
+    });
+  } catch (err: any) {
+    console.error('Firebase Google auth error:', err);
+    res.status(401).json({ error: 'Invalid Firebase token' });
+  }
+});
+
+// GET /api/auth/google - redirect to Google sign-in (legacy)
 router.get('/google', (_req: Request, res: Response) => {
   try {
     const state = JSON.stringify({ action: 'signin' });
