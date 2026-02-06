@@ -1,5 +1,5 @@
-import { useState, useEffect } from 'react';
-import { calendarAPI, aiAPI, syllabusAPI } from '../services/api';
+import { useState, useEffect, useRef, useCallback } from 'react';
+import { calendarAPI, aiAPI, syllabusAPI, friendsAPI } from '../services/api';
 import toast from 'react-hot-toast';
 import {
   Plus,
@@ -10,6 +10,7 @@ import {
   CalendarDays,
   Trash2,
   ClipboardPaste,
+  Users,
 } from 'lucide-react';
 
 interface ExtractedItem {
@@ -50,6 +51,14 @@ export default function AssignmentsPage() {
   const [description, setDescription] = useState('');
   const [submitting, setSubmitting] = useState(false);
 
+  // Friend match state
+  const [matchResult, setMatchResult] = useState<{
+    count: number;
+    matches: Array<{ name: string; email: string; className: string; date: string; status: string }>;
+  } | null>(null);
+  const [matchLoading, setMatchLoading] = useState(false);
+  const matchDebounce = useRef<ReturnType<typeof setTimeout> | undefined>(undefined);
+
   // AI state
   const [aiText, setAiText] = useState('');
   const [extracting, setExtracting] = useState(false);
@@ -58,6 +67,26 @@ export default function AssignmentsPage() {
 
   useEffect(() => {
     syllabusAPI.list().then(res => setSyllabi(res.data)).catch(() => {});
+  }, []);
+
+  // Debounced friend match check
+  const checkFriendMatch = useCallback((titleVal: string, classVal: string) => {
+    if (matchDebounce.current) clearTimeout(matchDebounce.current);
+    if (titleVal.trim().length < 2) {
+      setMatchResult(null);
+      return;
+    }
+    matchDebounce.current = setTimeout(async () => {
+      setMatchLoading(true);
+      try {
+        const res = await friendsAPI.matchAssignment(titleVal.trim(), classVal || undefined);
+        setMatchResult(res.data);
+      } catch {
+        setMatchResult(null);
+      } finally {
+        setMatchLoading(false);
+      }
+    }, 400);
   }, []);
 
   const courseNames = [...new Set(syllabi.map(s => s.className))];
@@ -87,6 +116,7 @@ export default function AssignmentsPage() {
       setTime('23:59');
       setDescription('');
       setEventType('assignment');
+      setMatchResult(null);
     } catch (err: any) {
       toast.error(err.response?.data?.error || 'Failed to add assignment');
     } finally {
@@ -222,11 +252,55 @@ export default function AssignmentsPage() {
             <input
               type="text"
               value={title}
-              onChange={(e) => setTitle(e.target.value)}
+              onChange={(e) => {
+                setTitle(e.target.value);
+                const resolvedClass = className === '__custom__' ? customClass : className;
+                checkFriendMatch(e.target.value, resolvedClass);
+              }}
               required
               className="w-full px-3 py-2 bg-white dark:bg-gray-900 border border-gray-300 dark:border-gray-700 rounded-md text-sm text-gray-900 dark:text-gray-100 placeholder-gray-400 dark:placeholder-gray-600 focus:ring-2 focus:ring-blue-500 focus:border-blue-500 outline-none"
               placeholder="e.g. Homework 3, Midterm Exam"
             />
+
+            {/* Friend match indicator */}
+            {title.trim().length >= 2 && !matchLoading && matchResult && (
+              <div className={`mt-2 flex items-start gap-2 px-3 py-2.5 rounded-md border text-xs ${
+                matchResult.count > 0
+                  ? 'bg-blue-50 dark:bg-blue-950/20 border-blue-200 dark:border-blue-900'
+                  : 'bg-gray-50 dark:bg-gray-900/50 border-gray-200 dark:border-gray-800'
+              }`}>
+                <Users className={`w-3.5 h-3.5 mt-0.5 flex-shrink-0 ${
+                  matchResult.count > 0 ? 'text-blue-500' : 'text-gray-400 dark:text-gray-500'
+                }`} />
+                <div>
+                  {matchResult.count > 0 ? (
+                    <>
+                      <p className="font-medium text-blue-700 dark:text-blue-300">
+                        {matchResult.count} friend{matchResult.count !== 1 ? 's' : ''} already {matchResult.count !== 1 ? 'have' : 'has'} this assignment
+                      </p>
+                      <div className="mt-1 space-y-0.5">
+                        {matchResult.matches.map((m, i) => (
+                          <p key={i} className="text-blue-600/80 dark:text-blue-400/80">
+                            {m.name} — {m.className}
+                            {m.status === 'done' ? ' ✓ Done' : m.status === 'in_progress' ? ' ⏳ Working' : ''}
+                          </p>
+                        ))}
+                      </div>
+                    </>
+                  ) : (
+                    <p className="text-gray-500 dark:text-gray-400">
+                      New assignment — none of your friends have this yet
+                    </p>
+                  )}
+                </div>
+              </div>
+            )}
+            {title.trim().length >= 2 && matchLoading && (
+              <div className="mt-2 flex items-center gap-2 px-3 py-2 text-xs text-gray-400 dark:text-gray-500">
+                <Loader2 className="w-3 h-3 animate-spin" />
+                Checking friends...
+              </div>
+            )}
           </div>
 
           {/* Course */}
@@ -238,7 +312,11 @@ export default function AssignmentsPage() {
               <div className="space-y-2">
                 <select
                   value={className}
-                  onChange={(e) => setClassName(e.target.value)}
+                  onChange={(e) => {
+                    setClassName(e.target.value);
+                    const resolvedClass = e.target.value === '__custom__' ? customClass : e.target.value;
+                    checkFriendMatch(title, resolvedClass);
+                  }}
                   required
                   className="w-full px-3 py-2 bg-white dark:bg-gray-900 border border-gray-300 dark:border-gray-700 rounded-md text-sm text-gray-900 dark:text-gray-100 focus:ring-2 focus:ring-blue-500 outline-none"
                 >

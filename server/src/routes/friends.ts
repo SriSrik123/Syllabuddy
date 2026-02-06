@@ -389,4 +389,73 @@ router.get('/progress', authenticateToken, async (req: AuthRequest, res: Respons
   }
 });
 
+// GET /api/friends/match-assignment?title=...&className=... - check if friends have same assignment
+router.get('/match-assignment', authenticateToken, async (req: AuthRequest, res: Response) => {
+  try {
+    const titleRaw = (req.query.title as string || '').trim();
+    const classRaw = (req.query.className as string || '').trim();
+
+    if (titleRaw.length < 2) {
+      res.json({ matches: [], count: 0 });
+      return;
+    }
+
+    const normalize = (s: string) => s.toLowerCase().replace(/[^a-z0-9]/g, '');
+    const titleNorm = normalize(titleRaw);
+
+    // Get friend IDs
+    const friendships = await Friendship.find({
+      $or: [{ requester: req.userId }, { recipient: req.userId }],
+      status: 'accepted',
+    });
+
+    const friendIds = friendships.map((f) =>
+      f.requester.toString() === req.userId ? f.recipient : f.requester
+    );
+
+    if (friendIds.length === 0) {
+      res.json({ matches: [], count: 0 });
+      return;
+    }
+
+    // Get friends' events
+    const friendEvents = await CalendarEvent.find({
+      userId: { $in: friendIds },
+    }).populate('userId', 'name email');
+
+    // Filter by normalized title (and optionally class)
+    const classNorm = classRaw ? normalize(classRaw) : '';
+    const matching = friendEvents.filter((fe) => {
+      const feTitle = normalize(fe.title);
+      // Fuzzy: check if normalized titles match
+      if (feTitle !== titleNorm) return false;
+      // If class provided, also check class match
+      if (classNorm && normalize(fe.className) !== classNorm) return false;
+      return true;
+    });
+
+    // De-duplicate by user
+    const seen = new Set<string>();
+    const matches: Array<{ name: string; email: string; className: string; date: string; status: string }> = [];
+    for (const fe of matching) {
+      const user = fe.userId as any;
+      const uid = user._id?.toString() || '';
+      if (seen.has(uid)) continue;
+      seen.add(uid);
+      matches.push({
+        name: user.name || 'Unknown',
+        email: user.email || '',
+        className: fe.className,
+        date: fe.date.toISOString(),
+        status: fe.status || 'todo',
+      });
+    }
+
+    res.json({ matches, count: matches.length });
+  } catch (err) {
+    console.error('Match assignment error:', err);
+    res.status(500).json({ error: 'Failed to match assignment' });
+  }
+});
+
 export default router;

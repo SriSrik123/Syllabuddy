@@ -115,6 +115,8 @@ export const friendsAPI = {
   getProgress: () => api.get('/friends/progress'),
   getClassOverlap: () => api.get('/friends/class-overlap'),
   getEventFriends: (eventId: string) => api.get(`/friends/event-friends/${eventId}`),
+  matchAssignment: (title: string, className?: string) =>
+    api.get('/friends/match-assignment', { params: { title, className } }),
 };
 
 export default api;
