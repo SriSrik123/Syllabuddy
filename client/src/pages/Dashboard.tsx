@@ -161,6 +161,9 @@ export default function Dashboard() {
 
   const firstName = user?.name?.split(' ')[0] || 'there';
 
+  // Build shared events list: upcoming events that friends also have
+  const sharedEvents = upcomingEvents.filter(e => eventOverlap[e._id] || (friendProgress[e._id] && friendProgress[e._id].total > 0));
+
   return (
     <div className="max-w-5xl mx-auto">
       {/* Header */}
@@ -190,6 +193,90 @@ export default function Dashboard() {
           </div>
         ))}
       </div>
+
+      {/* Friends Activity Box */}
+      {friendCount > 0 && (
+        <div className="mb-8 bg-white dark:bg-gray-900 rounded-xl border border-gray-200 dark:border-gray-800 overflow-hidden">
+          <div className="px-5 py-4 border-b border-gray-100 dark:border-gray-800 flex items-center gap-2.5">
+            <div className="w-8 h-8 bg-blue-100 dark:bg-blue-900/40 rounded-lg flex items-center justify-center">
+              <Users className="w-4 h-4 text-blue-600 dark:text-blue-400" />
+            </div>
+            <div>
+              <h2 className="text-sm font-semibold text-gray-900 dark:text-white">Friends Activity</h2>
+              <p className="text-xs text-gray-500 dark:text-gray-400">See who shares your classes, exams, and assignments</p>
+            </div>
+          </div>
+
+          {sharedEvents.length === 0 ? (
+            <div className="px-5 py-6 text-center">
+              <p className="text-sm text-gray-500 dark:text-gray-400">
+                None of your upcoming events are shared with friends yet.
+              </p>
+              <p className="text-xs text-gray-400 dark:text-gray-500 mt-1">
+                When friends upload the same syllabi, you'll see who has the same exams and assignments.
+              </p>
+            </div>
+          ) : (
+            <div className="divide-y divide-gray-100 dark:divide-gray-800">
+              {sharedEvents.map((event) => {
+                const overlap = eventOverlap[event._id] || 0;
+                const fp = friendProgress[event._id];
+                const count = fp ? fp.total : overlap;
+                const doneCount = fp ? fp.done : 0;
+                const wipCount = fp ? fp.in_progress : 0;
+
+                return (
+                  <button
+                    key={event._id}
+                    onClick={() => handleEventClick(event)}
+                    className="w-full flex items-center gap-4 px-5 py-3.5 text-left hover:bg-blue-50/50 dark:hover:bg-blue-950/10 transition-colors"
+                  >
+                    {/* Left: icon with count */}
+                    <div className="w-10 h-10 bg-blue-50 dark:bg-blue-900/30 rounded-full flex items-center justify-center flex-shrink-0">
+                      <span className="text-sm font-bold text-blue-600 dark:text-blue-400">{count}</span>
+                    </div>
+
+                    {/* Middle: event info */}
+                    <div className="flex-1 min-w-0">
+                      <p className="text-sm font-medium text-gray-900 dark:text-white truncate">
+                        {event.title}
+                      </p>
+                      <p className="text-xs text-gray-500 dark:text-gray-400">
+                        {event.className} &middot; {typeLabel[event.eventType] || 'Event'} &middot; {relativeDate(event.date)}
+                      </p>
+                      {/* Progress summary */}
+                      {fp && fp.total > 0 && (
+                        <div className="flex items-center gap-2 mt-1">
+                          <div className="w-20 h-1.5 bg-gray-200 dark:bg-gray-700 rounded-full overflow-hidden flex">
+                            {doneCount > 0 && (
+                              <div className="h-full bg-green-500 rounded-full" style={{ width: `${(doneCount / fp.total) * 100}%` }} />
+                            )}
+                            {wipCount > 0 && (
+                              <div className="h-full bg-amber-400" style={{ width: `${(wipCount / fp.total) * 100}%` }} />
+                            )}
+                          </div>
+                          <span className="text-[10px] text-gray-500 dark:text-gray-400">
+                            {doneCount > 0 ? `${doneCount} done` : ''}{doneCount > 0 && wipCount > 0 ? ', ' : ''}{wipCount > 0 ? `${wipCount} working` : ''}
+                            {doneCount === 0 && wipCount === 0 ? `${count} friend${count !== 1 ? 's' : ''} have this` : ''}
+                          </span>
+                        </div>
+                      )}
+                      {!fp && overlap > 0 && (
+                        <p className="text-[10px] text-blue-500 dark:text-blue-400 mt-0.5">
+                          {overlap} friend{overlap !== 1 ? 's' : ''} also have this — click to see who
+                        </p>
+                      )}
+                    </div>
+
+                    {/* Right: chevron */}
+                    <ChevronRight className="w-4 h-4 text-gray-300 dark:text-gray-600 flex-shrink-0" />
+                  </button>
+                );
+              })}
+            </div>
+          )}
+        </div>
+      )}
 
       <div className="grid grid-cols-1 lg:grid-cols-3 gap-6">
         {/* Left column - Courses + Actions */}
