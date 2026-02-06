@@ -51,13 +51,22 @@ export default function AssignmentsPage() {
   const [description, setDescription] = useState('');
   const [submitting, setSubmitting] = useState(false);
 
-  // Friend match state
-  const [matchResult, setMatchResult] = useState<{
-    count: number;
-    matches: Array<{ name: string; email: string; className: string; date: string; status: string }>;
-  } | null>(null);
+  // Friend suggestion state
+  interface Suggestion {
+    title: string;
+    className: string;
+    date: string;
+    time: string;
+    eventType: string;
+    description: string;
+    friends: Array<{ name: string; status: string }>;
+    exact: boolean;
+  }
+  const [suggestions, setSuggestions] = useState<Suggestion[]>([]);
+  const [showSuggestions, setShowSuggestions] = useState(false);
   const [matchLoading, setMatchLoading] = useState(false);
   const matchDebounce = useRef<ReturnType<typeof setTimeout> | undefined>(undefined);
+  const suggestRef = useRef<HTMLDivElement>(null);
 
   // AI state
   const [aiText, setAiText] = useState('');
@@ -69,25 +78,56 @@ export default function AssignmentsPage() {
     syllabusAPI.list().then(res => setSyllabi(res.data)).catch(() => {});
   }, []);
 
-  // Debounced friend match check
+  // Close suggestions when clicking outside
+  useEffect(() => {
+    const handleClickOutside = (e: MouseEvent) => {
+      if (suggestRef.current && !suggestRef.current.contains(e.target as Node)) {
+        setShowSuggestions(false);
+      }
+    };
+    document.addEventListener('mousedown', handleClickOutside);
+    return () => document.removeEventListener('mousedown', handleClickOutside);
+  }, []);
+
+  // Debounced friend suggestion check
   const checkFriendMatch = useCallback((titleVal: string, classVal: string) => {
     if (matchDebounce.current) clearTimeout(matchDebounce.current);
     if (titleVal.trim().length < 2) {
-      setMatchResult(null);
+      setSuggestions([]);
+      setShowSuggestions(false);
       return;
     }
     matchDebounce.current = setTimeout(async () => {
       setMatchLoading(true);
       try {
         const res = await friendsAPI.matchAssignment(titleVal.trim(), classVal || undefined);
-        setMatchResult(res.data);
+        setSuggestions(res.data.suggestions || []);
+        setShowSuggestions(true);
       } catch {
-        setMatchResult(null);
+        setSuggestions([]);
       } finally {
         setMatchLoading(false);
       }
-    }, 400);
+    }, 300);
   }, []);
+
+  // Autofill form from a friend's suggestion
+  const handleSelectSuggestion = (s: Suggestion) => {
+    setTitle(s.title);
+    setDate(s.date);
+    setTime(s.time || '23:59');
+    setEventType(s.eventType || 'assignment');
+    setDescription(s.description || '');
+    // Set class — use dropdown if it matches a known course, otherwise use custom
+    if (courseNames.includes(s.className)) {
+      setClassName(s.className);
+    } else {
+      setClassName('__custom__');
+      setCustomClass(s.className);
+    }
+    setShowSuggestions(false);
+    toast.success(`Autofilled from ${s.friends.map(f => f.name).join(', ')}'s assignment`);
+  };
 
   const courseNames = [...new Set(syllabi.map(s => s.className))];
 
@@ -116,7 +156,8 @@ export default function AssignmentsPage() {
       setTime('23:59');
       setDescription('');
       setEventType('assignment');
-      setMatchResult(null);
+      setSuggestions([]);
+      setShowSuggestions(false);
     } catch (err: any) {
       toast.error(err.response?.data?.error || 'Failed to add assignment');
     } finally {
@@ -244,62 +285,76 @@ export default function AssignmentsPage() {
       {/* Manual Tab */}
       {tab === 'manual' && (
         <form onSubmit={handleManualSubmit} className="space-y-4">
-          {/* Title */}
-          <div>
+          {/* Title with autocomplete */}
+          <div ref={suggestRef} className="relative">
             <label className="block text-[13px] font-medium text-gray-700 dark:text-gray-300 mb-1.5">
               Title
             </label>
-            <input
-              type="text"
-              value={title}
-              onChange={(e) => {
-                setTitle(e.target.value);
-                const resolvedClass = className === '__custom__' ? customClass : className;
-                checkFriendMatch(e.target.value, resolvedClass);
-              }}
-              required
-              className="w-full px-3 py-2 bg-white dark:bg-gray-900 border border-gray-300 dark:border-gray-700 rounded-md text-sm text-gray-900 dark:text-gray-100 placeholder-gray-400 dark:placeholder-gray-600 focus:ring-2 focus:ring-blue-500 focus:border-blue-500 outline-none"
-              placeholder="e.g. Homework 3, Midterm Exam"
-            />
+            <div className="relative">
+              <input
+                type="text"
+                value={title}
+                onChange={(e) => {
+                  setTitle(e.target.value);
+                  const resolvedClass = className === '__custom__' ? customClass : className;
+                  checkFriendMatch(e.target.value, resolvedClass);
+                }}
+                onFocus={() => { if (suggestions.length > 0) setShowSuggestions(true); }}
+                required
+                className="w-full px-3 py-2 bg-white dark:bg-gray-900 border border-gray-300 dark:border-gray-700 rounded-md text-sm text-gray-900 dark:text-gray-100 placeholder-gray-400 dark:placeholder-gray-600 focus:ring-2 focus:ring-blue-500 focus:border-blue-500 outline-none"
+                placeholder="e.g. Homework 3, Midterm Exam"
+              />
+              {matchLoading && (
+                <Loader2 className="absolute right-3 top-1/2 -translate-y-1/2 w-3.5 h-3.5 animate-spin text-gray-400" />
+              )}
+            </div>
 
-            {/* Friend match indicator */}
-            {title.trim().length >= 2 && !matchLoading && matchResult && (
-              <div className={`mt-2 flex items-start gap-2 px-3 py-2.5 rounded-md border text-xs ${
-                matchResult.count > 0
-                  ? 'bg-blue-50 dark:bg-blue-950/20 border-blue-200 dark:border-blue-900'
-                  : 'bg-gray-50 dark:bg-gray-900/50 border-gray-200 dark:border-gray-800'
-              }`}>
-                <Users className={`w-3.5 h-3.5 mt-0.5 flex-shrink-0 ${
-                  matchResult.count > 0 ? 'text-blue-500' : 'text-gray-400 dark:text-gray-500'
-                }`} />
-                <div>
-                  {matchResult.count > 0 ? (
-                    <>
-                      <p className="font-medium text-blue-700 dark:text-blue-300">
-                        {matchResult.count} friend{matchResult.count !== 1 ? 's' : ''} already {matchResult.count !== 1 ? 'have' : 'has'} this assignment
-                      </p>
-                      <div className="mt-1 space-y-0.5">
-                        {matchResult.matches.map((m, i) => (
-                          <p key={i} className="text-blue-600/80 dark:text-blue-400/80">
-                            {m.name} — {m.className}
-                            {m.status === 'done' ? ' ✓ Done' : m.status === 'in_progress' ? ' ⏳ Working' : ''}
-                          </p>
-                        ))}
-                      </div>
-                    </>
-                  ) : (
-                    <p className="text-gray-500 dark:text-gray-400">
-                      New assignment — none of your friends have this yet
-                    </p>
-                  )}
+            {/* Suggestions dropdown */}
+            {showSuggestions && suggestions.length > 0 && (
+              <div className="absolute z-20 mt-1 w-full bg-white dark:bg-gray-900 border border-gray-200 dark:border-gray-700 rounded-md shadow-lg max-h-72 overflow-y-auto">
+                <div className="px-3 py-2 border-b border-gray-100 dark:border-gray-800">
+                  <p className="text-[10px] font-semibold uppercase tracking-wider text-gray-400 dark:text-gray-500">
+                    Friends' assignments — click to autofill
+                  </p>
                 </div>
+                {suggestions.map((s, i) => (
+                  <button
+                    key={i}
+                    type="button"
+                    onClick={() => handleSelectSuggestion(s)}
+                    className="w-full text-left px-3 py-2.5 hover:bg-blue-50 dark:hover:bg-blue-950/20 transition-colors border-b border-gray-50 dark:border-gray-800/50 last:border-0"
+                  >
+                    <div className="flex items-start gap-2.5">
+                      <div className="w-7 h-7 bg-blue-50 dark:bg-blue-900/30 rounded-full flex items-center justify-center flex-shrink-0 mt-0.5">
+                        <Users className="w-3 h-3 text-blue-500 dark:text-blue-400" />
+                      </div>
+                      <div className="flex-1 min-w-0">
+                        <p className="text-sm font-medium text-gray-900 dark:text-white truncate">{s.title}</p>
+                        <p className="text-xs text-gray-500 dark:text-gray-400 mt-0.5">
+                          {s.className} · {s.eventType} · {new Date(s.date + 'T00:00:00').toLocaleDateString('en-US', { month: 'short', day: 'numeric' })}
+                        </p>
+                        <div className="flex items-center gap-1 mt-1 flex-wrap">
+                          {s.friends.map((f, j) => (
+                            <span key={j} className="inline-flex items-center gap-1 text-[10px] px-1.5 py-0.5 rounded-full bg-blue-50 dark:bg-blue-900/30 text-blue-600 dark:text-blue-400">
+                              {f.name}
+                              {f.status === 'done' && <span className="text-green-500">✓</span>}
+                              {f.status === 'in_progress' && <span className="text-amber-500">⏳</span>}
+                            </span>
+                          ))}
+                        </div>
+                      </div>
+                    </div>
+                  </button>
+                ))}
               </div>
             )}
-            {title.trim().length >= 2 && matchLoading && (
-              <div className="mt-2 flex items-center gap-2 px-3 py-2 text-xs text-gray-400 dark:text-gray-500">
-                <Loader2 className="w-3 h-3 animate-spin" />
-                Checking friends...
-              </div>
+
+            {/* "New assignment" indicator when typed but no matches */}
+            {title.trim().length >= 2 && !matchLoading && !showSuggestions && suggestions.length === 0 && (
+              <p className="mt-1.5 text-[11px] text-gray-400 dark:text-gray-500 flex items-center gap-1.5">
+                <Plus className="w-3 h-3" />
+                New assignment — none of your friends have this yet
+              </p>
             )}
           </div>
 

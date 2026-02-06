@@ -389,14 +389,14 @@ router.get('/progress', authenticateToken, async (req: AuthRequest, res: Respons
   }
 });
 
-// GET /api/friends/match-assignment?title=...&className=... - check if friends have same assignment
+// GET /api/friends/match-assignment?title=...&className=... - suggest friends' assignments as user types
 router.get('/match-assignment', authenticateToken, async (req: AuthRequest, res: Response) => {
   try {
     const titleRaw = (req.query.title as string || '').trim();
     const classRaw = (req.query.className as string || '').trim();
 
     if (titleRaw.length < 2) {
-      res.json({ matches: [], count: 0 });
+      res.json({ suggestions: [] });
       return;
     }
 
@@ -414,7 +414,7 @@ router.get('/match-assignment', authenticateToken, async (req: AuthRequest, res:
     );
 
     if (friendIds.length === 0) {
-      res.json({ matches: [], count: 0 });
+      res.json({ suggestions: [] });
       return;
     }
 
@@ -423,35 +423,61 @@ router.get('/match-assignment', authenticateToken, async (req: AuthRequest, res:
       userId: { $in: friendIds },
     }).populate('userId', 'name email');
 
-    // Filter by normalized title (and optionally class)
+    // Partial match: normalized friend title must CONTAIN the normalized search
     const classNorm = classRaw ? normalize(classRaw) : '';
     const matching = friendEvents.filter((fe) => {
       const feTitle = normalize(fe.title);
-      // Fuzzy: check if normalized titles match
-      if (feTitle !== titleNorm) return false;
-      // If class provided, also check class match
+      if (!feTitle.includes(titleNorm)) return false;
       if (classNorm && normalize(fe.className) !== classNorm) return false;
       return true;
     });
 
-    // De-duplicate by user
-    const seen = new Set<string>();
-    const matches: Array<{ name: string; email: string; className: string; date: string; status: string }> = [];
-    for (const fe of matching) {
-      const user = fe.userId as any;
-      const uid = user._id?.toString() || '';
-      if (seen.has(uid)) continue;
-      seen.add(uid);
-      matches.push({
-        name: user.name || 'Unknown',
-        email: user.email || '',
-        className: fe.className,
-        date: fe.date.toISOString(),
-        status: fe.status || 'todo',
-      });
+    // Group by normalized (title + class) to de-duplicate the same assignment across friends
+    interface Suggestion {
+      title: string;
+      className: string;
+      date: string;
+      time: string;
+      eventType: string;
+      description: string;
+      friends: Array<{ name: string; status: string }>;
+      exact: boolean; // whether it's an exact title match
     }
 
-    res.json({ matches, count: matches.length });
+    const groupKey = (fe: any) => `${normalize(fe.className)}::${normalize(fe.title)}`;
+    const groups: Record<string, Suggestion> = {};
+
+    for (const fe of matching) {
+      const key = groupKey(fe);
+      const user = fe.userId as any;
+      if (!groups[key]) {
+        const dateStr = fe.date instanceof Date ? fe.date.toISOString().slice(0, 10) : String(fe.date).slice(0, 10);
+        groups[key] = {
+          title: fe.title,
+          className: fe.className,
+          date: dateStr,
+          time: fe.time || '23:59',
+          eventType: fe.eventType || 'assignment',
+          description: fe.description || '',
+          friends: [],
+          exact: normalize(fe.title) === titleNorm,
+        };
+      }
+      // Avoid duplicate friend names
+      const friendName = user.name || 'Unknown';
+      if (!groups[key].friends.some((f: any) => f.name === friendName)) {
+        groups[key].friends.push({ name: friendName, status: fe.status || 'todo' });
+      }
+    }
+
+    // Sort: exact matches first, then by number of friends
+    const suggestions = Object.values(groups).sort((a, b) => {
+      if (a.exact && !b.exact) return -1;
+      if (!a.exact && b.exact) return 1;
+      return b.friends.length - a.friends.length;
+    }).slice(0, 8);
+
+    res.json({ suggestions });
   } catch (err) {
     console.error('Match assignment error:', err);
     res.status(500).json({ error: 'Failed to match assignment' });
