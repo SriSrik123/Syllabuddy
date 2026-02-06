@@ -1,0 +1,8 @@
+node_modules/
+dist/
+.env
+server/uploads/*
+!server/uploads/.gitkeep
+server/vector-store/*
+!server/vector-store/.gitkeep
+client/dist/
