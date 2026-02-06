@@ -46,8 +46,15 @@ export default function UploadPage() {
 
     setUploading(true);
     try {
-      await syllabusAPI.upload(file, className.trim());
-      toast.success('Syllabus uploaded and processed.');
+      const res = await syllabusAPI.upload(file, className.trim());
+      const { chunksIndexed, datesExtracted, textLength } = res.data;
+      if (chunksIndexed > 0) {
+        toast.success(`Uploaded! ${chunksIndexed} chunks indexed, ${datesExtracted} dates found.`);
+      } else if (textLength > 0) {
+        toast.success(`Uploaded! Text extracted (${textLength} chars) but embedding failed — AI Q&A may not work.`);
+      } else {
+        toast.success('Uploaded, but no text could be extracted from this file.');
+      }
       navigate('/dashboard');
     } catch (err: any) {
       toast.error(err.response?.data?.error || 'Upload failed');
