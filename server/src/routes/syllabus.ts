@@ -71,13 +71,17 @@ router.post('/upload', authenticateToken, upload.single('file'), async (req: Aut
 
     // Index in RAG pipeline (synchronous - wait for it)
     let chunksIndexed = 0;
+    console.log(`Extracted text length: ${extractedText.length}, first 200 chars: ${extractedText.substring(0, 200)}`);
     if (extractedText && extractedText !== '[Text extraction failed]') {
       try {
         chunksIndexed = await indexSyllabus(userId, syllabusId, className, extractedText);
         console.log(`Indexed ${chunksIndexed} chunks for syllabus ${syllabusId}`);
-      } catch (err) {
-        console.error('RAG indexing error:', err);
+      } catch (err: any) {
+        console.error('RAG indexing error:', err?.message || err);
+        console.error('RAG indexing full error:', JSON.stringify(err, null, 2));
       }
+    } else {
+      console.log('Skipping RAG indexing - no extracted text or extraction failed');
     }
 
     // Extract dates (synchronous - wait for it)
