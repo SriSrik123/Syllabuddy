@@ -7,18 +7,50 @@ import mongoose from 'mongoose';
 
 const router = Router();
 
-// POST /api/friends/request - send friend request by email
-router.post('/request', authenticateToken, async (req: AuthRequest, res: Response) => {
+// GET /api/friends/search?q=query - search users by name or email
+router.get('/search', authenticateToken, async (req: AuthRequest, res: Response) => {
   try {
-    const { email } = req.body;
-    if (!email) {
-      res.status(400).json({ error: 'Email is required' });
+    const q = (req.query.q as string || '').trim();
+    if (q.length < 2) {
+      res.json([]);
       return;
     }
 
-    const recipient = await User.findOne({ email: email.toLowerCase().trim() });
+    const regex = new RegExp(q, 'i');
+    const users = await User.find({
+      _id: { $ne: req.userId },
+      $or: [
+        { name: regex },
+        { email: regex },
+      ],
+    })
+      .select('name email')
+      .limit(10);
+
+    res.json(users);
+  } catch (err) {
+    console.error('User search error:', err);
+    res.status(500).json({ error: 'Search failed' });
+  }
+});
+
+// POST /api/friends/request - send friend request by userId or email
+router.post('/request', authenticateToken, async (req: AuthRequest, res: Response) => {
+  try {
+    const { email, userId: targetUserId } = req.body;
+
+    let recipient;
+    if (targetUserId) {
+      recipient = await User.findById(targetUserId);
+    } else if (email) {
+      recipient = await User.findOne({ email: email.toLowerCase().trim() });
+    } else {
+      res.status(400).json({ error: 'Name or email is required' });
+      return;
+    }
+
     if (!recipient) {
-      res.status(404).json({ error: 'No user found with that email' });
+      res.status(404).json({ error: 'No user found' });
       return;
     }
 
@@ -162,6 +194,69 @@ router.delete('/:id', authenticateToken, async (req: AuthRequest, res: Response)
     res.json({ message: 'Friend removed' });
   } catch (err) {
     res.status(500).json({ error: 'Failed to remove friend' });
+  }
+});
+
+// GET /api/friends/class-overlap - how many friends share each class/event
+router.get('/class-overlap', authenticateToken, async (req: AuthRequest, res: Response) => {
+  try {
+    // Get friend IDs
+    const friendships = await Friendship.find({
+      $or: [{ requester: req.userId }, { recipient: req.userId }],
+      status: 'accepted',
+    });
+
+    const friendIds = friendships.map((f) =>
+      f.requester.toString() === req.userId ? f.recipient : f.requester
+    );
+
+    if (friendIds.length === 0) {
+      res.json({ classOverlap: {}, eventOverlap: {} });
+      return;
+    }
+
+    // Get user's classes
+    const myEvents = await CalendarEvent.find({ userId: req.userId });
+    const myClassNames = [...new Set(myEvents.map((e) => e.className))];
+
+    // Count how many friends have events in each class
+    const friendEvents = await CalendarEvent.find({
+      userId: { $in: friendIds },
+      className: { $in: myClassNames },
+    });
+
+    // Class overlap: how many unique friends per class
+    const classOverlap: Record<string, number> = {};
+    const classFriendSets: Record<string, Set<string>> = {};
+    for (const fe of friendEvents) {
+      if (!classFriendSets[fe.className]) classFriendSets[fe.className] = new Set();
+      classFriendSets[fe.className].add(fe.userId.toString());
+    }
+    for (const [cls, friendSet] of Object.entries(classFriendSets)) {
+      classOverlap[cls] = friendSet.size;
+    }
+
+    // Event overlap: for each of user's events, how many friends have that same event
+    const normalize = (s: string) => s.toLowerCase().replace(/[^a-z0-9]/g, '');
+    const eventFriendCount: Record<string, Set<string>> = {};
+    for (const fe of friendEvents) {
+      const key = `${fe.className}::${normalize(fe.title)}`;
+      if (!eventFriendCount[key]) eventFriendCount[key] = new Set();
+      eventFriendCount[key].add(fe.userId.toString());
+    }
+
+    const eventOverlap: Record<string, number> = {};
+    for (const ev of myEvents) {
+      const key = `${ev.className}::${normalize(ev.title)}`;
+      if (eventFriendCount[key]) {
+        eventOverlap[ev._id.toString()] = eventFriendCount[key].size;
+      }
+    }
+
+    res.json({ classOverlap, eventOverlap });
+  } catch (err) {
+    console.error('Class overlap error:', err);
+    res.status(500).json({ error: 'Failed to fetch class overlap' });
   }
 });
 

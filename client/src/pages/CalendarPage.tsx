@@ -86,17 +86,20 @@ function GoogleCalIcon({ className }: { className?: string }) {
   );
 }
 
-function FriendProgressBar({ progress }: { progress: FriendProgress }) {
+function FriendProgressBar({ progress, friendCount }: { progress: FriendProgress; friendCount?: number }) {
   const { done, in_progress, total } = progress;
   if (total === 0) return null;
 
   const doneLabel = done > 0 ? `${done} done` : '';
   const wipLabel = in_progress > 0 ? `${in_progress} working` : '';
   const parts = [doneLabel, wipLabel].filter(Boolean).join(', ');
+  const friendLabel = friendCount !== undefined
+    ? `${friendCount} friend${friendCount !== 1 ? 's' : ''} also have this`
+    : '';
 
   return (
     <div className="flex items-center gap-1.5 mt-1">
-      <Users className="w-3 h-3 text-gray-400 dark:text-gray-500 flex-shrink-0" />
+      <Users className="w-3 h-3 text-blue-400 dark:text-blue-500 flex-shrink-0" />
       <div className="flex items-center gap-1">
         {/* Mini progress bar */}
         <div className="w-12 h-1 bg-gray-200 dark:bg-gray-700 rounded-full overflow-hidden flex">
@@ -114,7 +117,7 @@ function FriendProgressBar({ progress }: { progress: FriendProgress }) {
           )}
         </div>
         <span className="text-[10px] text-gray-500 dark:text-gray-400">
-          {parts || `${total} friend${total !== 1 ? 's' : ''}`} of {total}
+          {parts ? `${parts} of ${total}` : friendLabel || `${total} friend${total !== 1 ? 's' : ''}`}
         </span>
       </div>
     </div>
@@ -130,7 +133,7 @@ export default function CalendarPage() {
   const [addingEventId, setAddingEventId] = useState<string | null>(null);
   const [addingAll, setAddingAll] = useState(false);
   const [friendProgress, setFriendProgress] = useState<Record<string, FriendProgress>>({});
-  const [, setFriendCount] = useState(0);
+  const [eventOverlap, setEventOverlap] = useState<Record<string, number>>({});
   const { refreshUser } = useAuth();
   const [searchParams, setSearchParams] = useSearchParams();
 
@@ -170,9 +173,12 @@ export default function CalendarPage() {
 
   const loadFriendProgress = async () => {
     try {
-      const res = await friendsAPI.getProgress();
-      setFriendProgress(res.data.progress || {});
-      setFriendCount(res.data.friendCount || 0);
+      const [progressRes, overlapRes] = await Promise.all([
+        friendsAPI.getProgress(),
+        friendsAPI.getClassOverlap(),
+      ]);
+      setFriendProgress(progressRes.data.progress || {});
+      setEventOverlap(overlapRes.data.eventOverlap || {});
     } catch { /* ignore */ }
   };
 
@@ -454,8 +460,17 @@ export default function CalendarPage() {
                         <p className="text-[12px] text-gray-500 dark:text-gray-400 truncate">
                           {event.className} &middot; {formatDate(event.date)}{event.time ? ` at ${event.time}` : ''}
                         </p>
-                        {/* Friend progress */}
-                        {fp && <FriendProgressBar progress={fp} />}
+                        {/* Friend progress / overlap */}
+                        {fp ? (
+                          <FriendProgressBar progress={fp} friendCount={eventOverlap[event._id]} />
+                        ) : eventOverlap[event._id] ? (
+                          <div className="flex items-center gap-1.5 mt-1">
+                            <Users className="w-3 h-3 text-blue-400 dark:text-blue-500 flex-shrink-0" />
+                            <span className="text-[10px] text-gray-500 dark:text-gray-400">
+                              {eventOverlap[event._id]} friend{eventOverlap[event._id] !== 1 ? 's' : ''} also have this
+                            </span>
+                          </div>
+                        ) : null}
                       </div>
 
                       {/* Actions */}

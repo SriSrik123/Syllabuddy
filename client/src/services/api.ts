@@ -106,12 +106,14 @@ export const calendarAPI = {
 // Friends
 export const friendsAPI = {
   list: () => api.get('/friends'),
-  sendRequest: (email: string) => api.post('/friends/request', { email }),
+  search: (q: string) => api.get('/friends/search', { params: { q } }),
+  sendRequest: (data: { email?: string; userId?: string }) => api.post('/friends/request', data),
   getRequests: () => api.get('/friends/requests'),
   acceptRequest: (id: string) => api.post(`/friends/accept/${id}`),
   rejectRequest: (id: string) => api.post(`/friends/reject/${id}`),
   removeFriend: (id: string) => api.delete(`/friends/${id}`),
   getProgress: () => api.get('/friends/progress'),
+  getClassOverlap: () => api.get('/friends/class-overlap'),
 };
 
 export default api;
